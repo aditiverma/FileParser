@@ -19,7 +19,6 @@ class DatabaseConnect {
 	DatabaseConnect() {
 		try {
 			Class.forName("com.mysql.jdbc.Driver");
-			System.out.println("Connecting to database...");
 			conn = DriverManager.getConnection(URL, username, pass);
 		} catch (SQLException e) {
 			e.printStackTrace();
@@ -28,25 +27,25 @@ class DatabaseConnect {
 		}
 	}
 
-	void closeConnection()
-	{
+	void closeConnection() {
 		try {
 			conn.close();
 		} catch (SQLException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
 	}
+
 	/*
-	 * table metadata stores the names of data files that have been stored in
-	 * database. This is useful to avoid re-processing the same data file
+	 * table metadata stores the names of data and specs files that have been read from file system and 
+	 * stored in database. This is useful to avoid re-processing the same data/spec file
 	 */
+	
 	void createMetaTable() {
 		Statement stmt = null;
 		try {
 			stmt = conn.createStatement();
 			String sql = "create table if not exists metadata (file_name varchar(255))";
-			int rs = stmt.executeUpdate(sql);
+			stmt.executeUpdate(sql);
 			System.out.println("meta table created");
 			stmt.close();
 		} catch (SQLException e) {
@@ -54,133 +53,122 @@ class DatabaseConnect {
 		}
 	}
 
+	/*
+	 * when the application is started, this function loads the specs and data files and stores them
+	 * in database
+	 * */
 	void populateAllTables() {
 		String currentDir = System.getProperty("user.dir");
 		File specsDirectory = new File(currentDir + "/specs/");
 		File dataDirectory = new File(currentDir + "/data/");
 		File[] listOfSpecsFiles = specsDirectory.listFiles();
-
 		for (File file : listOfSpecsFiles) {
 			if (file.isFile()) {
-
-				System.out.println("spec file " + getFileName(file));
+				//create table with schema from spec file
 				createTable(file);
-	
-				//String specFile = file.getName();
-				//String specFormat = specFile.split("\\.")[0];
-				
 				String specFile = getFileName(file);
-				
 				File[] allDataFiles = dataDirectory.listFiles();
 				for (int i = 0; i < allDataFiles.length; i++) {
-
 					String dataFileName = allDataFiles[i].getName();
-					if (dataFileName.startsWith(specFile)) {// check file name
-																// correct
+					if (dataFileName.startsWith(specFile)) {
+						//populate content of data files into the table 
 						populateData(allDataFiles[i]);
-
 					}
 				}
-
 			}
 		}
 	}
 
 	/*
-	 * get file name without type extension (type can be .csv or .txt )
-	 * */
-	 String getFileName(File file)
-	{
-		String fileName=file.getName();
+	 * get file name without type extension (removes the extensions like .csv, .txt )
+	 */
+	String getFileName(File file) {
+		String fileName = file.getName();
 		return fileName.split("\\.")[0];
-		
 	}
-	 void createTable(File file) {
-		// check if file exists in metadata table
+
+	/*
+	 * create table from schema specified in specs file
+	 * */
+	void createTable(File file) {
 		try {
+			// check if file already exists in metadata (table was created before)
 			if (metaDataContains(file)) {
-				System.out.println("spec file added to meta");
 				return;
 			}
-			updateMetaTable(file);
 			ReadFiles reader = new ReadFiles();
-			List<String> specs = reader.getSpecContents(file);// check if
-																// size==0
+			//read contents of specs file and store as a list of strings
+			List<String> specs = reader.getSpecContents(file);
 			StringBuilder arguments = new StringBuilder();
 			Statement stmt = null;
+			//for each line in the file in /specs, split the line by ',' and store as arguments
 			for (int i = 0; i < specs.size(); i++) {
-				String[] cols = specs.get(i).split(",");// check if array size=3
-				arguments.append(cols[0]
-						+ " "
-						+ cols[2]
-						+ ""
-						+ (cols[2].toLowerCase().equals("boolean") ? "" : "("
-								+ cols[1] + ")"));
+				String[] cols = specs.get(i).split(",");
+				arguments.append(cols[0]+ " "+ cols[2]+ ""+ (cols[2].toLowerCase().equals("boolean") ? "" : "("+ cols[1] + ")"));
 				if (i < specs.size() - 1)//
 				{
 					arguments.append(",");
 				}
 			}
 			stmt = conn.createStatement();
-			String sql = "create table " + getFileName(file) + " (" + arguments
-					+ ");";
-			int rs = stmt.executeUpdate(sql);
-			System.out.println("spec table created "+file.getName());
+			String sql = "create table " + getFileName(file) + " (" + arguments+ ");";
+			stmt.executeUpdate(sql);
 			stmt.close();
 		} catch (SQLException e) {
 			e.printStackTrace();
+		} catch (NullPointerException e)
+		{
+			e.printStackTrace();
 		}
-
+		insertFileNameIntoMetaTable(file);
 	}
 
-	 void populateData(File dataFile) {
-		// check if dataFile exists in metadata table
+	/*
+	 * populate data file into the corresponding table
+	 * */
+	void populateData(File dataFile) {
+		// check if dataFile exists in metadata table (to check if file contents were already populated into table)
 		if (metaDataContains(dataFile)) {
-			
-			System.out.println("data file added");
 			return;
 		}
-		
-		updateMetaTable(dataFile);
 		String fileName = getFileName(dataFile);
 		String specFileName = fileName.substring(0, fileName.indexOf('_'));
-		// String dt=fileName.substring(fileName.indexOf("_")+1,
-		// fileName.indexOf("."));
 		try {
 			Statement stmt;
 			stmt = conn.createStatement();
-			String sql = "load data local infile '"
-					+ dataFile.getAbsolutePath() + "' into table "
-					+ specFileName;// check all formats
+			String sql = "load data local infile '"+ dataFile.getAbsolutePath() + "' into table "+ specFileName;// check all formats
+			stmt.executeUpdate(sql);
+			stmt.close();
+		} catch (SQLException e) {
+			e.printStackTrace();
+		}
+		insertFileNameIntoMetaTable(dataFile);
+	}
 
-			int rs = stmt.executeUpdate(sql);
-			System.out.println("file content loaded in data table "+fileName);
+	/*
+	 * To avoid reading a file twice and avoid duplicate writes to table, add every file to metadata table after first read 
+	 * */
+	void insertFileNameIntoMetaTable(File file) {
+		Statement stmt = null;
+		try {
+			stmt = conn.createStatement();
+			String sql = "insert into metadata values (\'" + getFileName(file)+ "\')";
+			stmt.executeUpdate(sql);
+			System.out.println("file added to meta table " + file.getName());
 			stmt.close();
 		} catch (SQLException e) {
 			e.printStackTrace();
 		}
 	}
 
-	 void updateMetaTable(File file) {
+	/*
+	 * Check if metadata contains file name (if file has been read once and inserted into table)
+	 * */
+	boolean metaDataContains(File file) {
 		Statement stmt = null;
 		try {
 			stmt = conn.createStatement();
-			String sql = "insert into metadata values (\'" + getFileName(file)
-					+ "\')";
-			int rs = stmt.executeUpdate(sql);
-			System.out.println("file added to meta table "+file.getName());
-			stmt.close();
-		} catch (SQLException e) {
-			e.printStackTrace();
-		}
-	}
-
-	 boolean metaDataContains(File file) {
-		Statement stmt = null;
-		try {
-			stmt = conn.createStatement();
-			String sql = "select file_name from  metadata where file_name=\'"
-					+ getFileName(file) + "\'";
+			String sql = "select file_name from  metadata where file_name=\'"+ getFileName(file) + "\'";
 			ResultSet rs = stmt.executeQuery(sql);
 			if (rs.next()) {
 				return true;

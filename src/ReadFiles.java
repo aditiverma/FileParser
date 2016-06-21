@@ -8,7 +8,7 @@ import java.util.List;
 
 
 public class ReadFiles {
-	static List<String> getSpecContents(File file) {
+	 List<String> getSpecContents(File file) {
 		List<String> specLines = new ArrayList<String>();
 		BufferedReader in;
 		try {
