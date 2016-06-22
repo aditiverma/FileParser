@@ -8,18 +8,15 @@ import java.util.List;
 
 
 public class ReadFiles {
-	 List<String> getSpecContents(File file) {
+  public List<String> getSpecContents(File file) {
 		List<String> specLines = new ArrayList<String>();
 		BufferedReader in;
 		try {
 			in = new BufferedReader(new InputStreamReader(new FileInputStream(file), "UTF8"));
 			String str;
-			int lineNo = 1;
+			in.readLine();
 			while ((str = in.readLine()) != null) {
-				if (lineNo > 1) {
 					specLines.add(str);
-				}
-				lineNo++;
 			}
 			in.close();
 		} catch (IOException e) {

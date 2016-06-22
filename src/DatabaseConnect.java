@@ -11,15 +11,22 @@ import java.util.List;
  * */
 
 class DatabaseConnect {
-	final static String URL = "jdbc:mysql://localhost/test";
-	final static String username = "root";
-	final static String pass = "root";
+  private static final String URL = "jdbc:mysql://localhost/";
+  private static final String DB_DRIVER = "com.mysql.jdbc.Driver";
+  private static final String USERNAME = "root";
+	private final static String PASS = "root";
+	private static final String METADATA_TABLE_NAME = "metadata";
+	private static final String DATABASE_NAME = "file_parser";
+
 	static Connection conn = null;
 
-	DatabaseConnect() {
+	public DatabaseConnect() {
 		try {
-			Class.forName("com.mysql.jdbc.Driver");
-			conn = DriverManager.getConnection(URL, username, pass);
+			Class.forName(DB_DRIVER);
+			conn = DriverManager.getConnection(URL, USERNAME, PASS);
+			Statement stmt = conn.createStatement();
+			String sql = "create database if not exists "+DATABASE_NAME;
+      stmt.executeUpdate(sql);
 		} catch (SQLException e) {
 			e.printStackTrace();
 		} catch (ClassNotFoundException e) {
@@ -27,7 +34,7 @@ class DatabaseConnect {
 		}
 	}
 
-	void closeConnection() {
+	public void closeConnection() {
 		try {
 			conn.close();
 		} catch (SQLException e) {
@@ -40,11 +47,11 @@ class DatabaseConnect {
 	 * stored in database. This is useful to avoid re-processing the same data/spec file
 	 */
 	
-	void createMetaTable() {
-		Statement stmt = null;
+	public void createMetaTable() {
+		Statement stmt = null;		
 		try {
 			stmt = conn.createStatement();
-			String sql = "create table if not exists metadata (file_name varchar(255))";
+			String sql = "create table if not exists "+DATABASE_NAME+"."+METADATA_TABLE_NAME+" (file_name varchar(255))";
 			stmt.executeUpdate(sql);
 			System.out.println("meta table created");
 			stmt.close();
@@ -57,7 +64,7 @@ class DatabaseConnect {
 	 * when the application is started, this function loads the specs and data files and stores them
 	 * in database
 	 * */
-	void populateAllTables() {
+	public void populateAllTables() {
 		String currentDir = System.getProperty("user.dir");
 		File specsDirectory = new File(currentDir + "/specs/");
 		File dataDirectory = new File(currentDir + "/data/");
@@ -66,12 +73,13 @@ class DatabaseConnect {
 			if (file.isFile()) {
 				//create table with schema from spec file
 				createTable(file);
-				String specFile = getFileName(file);
+				String specFile = processSpecFile(file);
 				File[] allDataFiles = dataDirectory.listFiles();
 				for (int i = 0; i < allDataFiles.length; i++) {
 					String dataFileName = allDataFiles[i].getName();
-					if (dataFileName.startsWith(specFile)) {
-						//populate content of data files into the table 
+					//if (dataFileName.startsWith(specFile)) {
+					if(dataFileName.substring(0, dataFileName.indexOf("_")).equals(specFile)){
+					//populate content of data files into the table 
 						populateData(allDataFiles[i]);
 					}
 				}
@@ -82,7 +90,7 @@ class DatabaseConnect {
 	/*
 	 * get file name without type extension (removes the extensions like .csv, .txt )
 	 */
-	String getFileName(File file) {
+	public String processSpecFile(File file) {
 		String fileName = file.getName();
 		return fileName.split("\\.")[0];
 	}
@@ -90,7 +98,7 @@ class DatabaseConnect {
 	/*
 	 * create table from schema specified in specs file
 	 * */
-	void createTable(File file) {
+	public void createTable(File file) {
 		try {
 			// check if file already exists in metadata (table was created before)
 			if (metaDataContains(file)) {
@@ -101,23 +109,27 @@ class DatabaseConnect {
 			List<String> specs = reader.getSpecContents(file);
 			StringBuilder arguments = new StringBuilder();
 			Statement stmt = null;
+		//	PreparedStatement pstmt = null;
 			//for each line in the file in /specs, split the line by ',' and store as arguments
 			for (int i = 0; i < specs.size(); i++) {
 				String[] cols = specs.get(i).split(",");
 				arguments.append(cols[0]+ " "+ cols[2]+ ""+ (cols[2].toLowerCase().equals("boolean") ? "" : "("+ cols[1] + ")"));
-				if (i < specs.size() - 1)//
-				{
+				if (i < specs.size() - 1){
 					arguments.append(",");
 				}
 			}
 			stmt = conn.createStatement();
-			String sql = "create table " + getFileName(file) + " (" + arguments+ ");";
+//			pstmt = conn.prepareStatement("create table ? ( ? );");
+//			pstmt.setString(1,DATABASE_NAME+"."+processSpecFile(file));
+//			pstmt.setString(2,arguments.toString());
+//			pstmt.executeUpdate();
+//			conn.commit();
+			String sql = "create table "+DATABASE_NAME+"."+ processSpecFile(file) + " (" + arguments+ ");";
 			stmt.executeUpdate(sql);
 			stmt.close();
 		} catch (SQLException e) {
 			e.printStackTrace();
-		} catch (NullPointerException e)
-		{
+		} catch (NullPointerException e){
 			e.printStackTrace();
 		}
 		insertFileNameIntoMetaTable(file);
@@ -126,17 +138,17 @@ class DatabaseConnect {
 	/*
 	 * populate data file into the corresponding table
 	 * */
-	void populateData(File dataFile) {
+	public void populateData(File dataFile) {
 		// check if dataFile exists in metadata table (to check if file contents were already populated into table)
 		if (metaDataContains(dataFile)) {
 			return;
 		}
-		String fileName = getFileName(dataFile);
+		String fileName = processSpecFile(dataFile);
 		String specFileName = fileName.substring(0, fileName.indexOf('_'));
 		try {
 			Statement stmt;
 			stmt = conn.createStatement();
-			String sql = "load data local infile '"+ dataFile.getAbsolutePath() + "' into table "+ specFileName;// check all formats
+			String sql = "load data local infile '"+ dataFile.getAbsolutePath() + "' into table "+DATABASE_NAME+"."+ specFileName;// check all formats
 			stmt.executeUpdate(sql);
 			stmt.close();
 		} catch (SQLException e) {
@@ -148,11 +160,11 @@ class DatabaseConnect {
 	/*
 	 * To avoid reading a file twice and avoid duplicate writes to table, add every file to metadata table after first read 
 	 * */
-	void insertFileNameIntoMetaTable(File file) {
+	public void insertFileNameIntoMetaTable(File file) {
 		Statement stmt = null;
 		try {
 			stmt = conn.createStatement();
-			String sql = "insert into metadata values (\'" + getFileName(file)+ "\')";
+			String sql = "insert into "+DATABASE_NAME+"."+METADATA_TABLE_NAME+" values (\'" + processSpecFile(file)+ "\')";
 			stmt.executeUpdate(sql);
 			System.out.println("file added to meta table " + file.getName());
 			stmt.close();
@@ -164,11 +176,11 @@ class DatabaseConnect {
 	/*
 	 * Check if metadata contains file name (if file has been read once and inserted into table)
 	 * */
-	boolean metaDataContains(File file) {
+	public boolean metaDataContains(File file) {
 		Statement stmt = null;
 		try {
 			stmt = conn.createStatement();
-			String sql = "select file_name from  metadata where file_name=\'"+ getFileName(file) + "\'";
+			String sql = "select file_name from "+DATABASE_NAME+"."+METADATA_TABLE_NAME+" where file_name=\'"+ processSpecFile(file) + "\'";
 			ResultSet rs = stmt.executeQuery(sql);
 			if (rs.next()) {
 				return true;
