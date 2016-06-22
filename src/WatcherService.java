@@ -10,12 +10,17 @@ import java.nio.file.WatchEvent;
 import java.nio.file.WatchKey;
 import java.nio.file.WatchService;
 import java.nio.file.WatchEvent.Kind;
+import java.util.ArrayList;
+import java.util.LinkedList;
+import java.util.Queue;
 
 /*
  * This clqss will watch the directories /spec and /data for new files, and add the newly dropped
  * files into database
  * */
 class WatcherService {
+  
+  private static Queue<File> dataFilesWithoutASpecFile = new LinkedList<File>();
 	public static void loadExistingFiles() {
 		// create connection with database
 		DatabaseConnect dc = new DatabaseConnect();
@@ -77,12 +82,27 @@ class WatcherService {
 						DatabaseConnect dc = new DatabaseConnect();
 						File newFile = new File(currentDir + dir+newPath.toString());
 						if(dir.equals("/data/")){
-							//insert contents of new data file into table
-							dc.populateData(newFile);
+						  //check if spec (schema definition) for this data file exists
+						  if(dc.doesSchemaExistForDataFile(newPath.toFile())){
+	              //insert contents of new data file into table
+	              dc.populateData(newFile);
+						  }
+						  else{
+						    dataFilesWithoutASpecFile.add(newPath.toFile());						    
+						  }
+
 						}
 						else{
 							//create table with the contents of new specs file
 							dc.createTable(newFile);
+							//check if data files for this new schema exist in the queue
+							for(File dataFile:dataFilesWithoutASpecFile){
+							  if(newPath.toFile().toString().split("\\.")[0].equals(dataFile.toString().split("_")[0])){
+							    dc.populateData(newFile);
+							    dataFilesWithoutASpecFile.remove(dataFile);
+							  }
+							    
+							}
 						}
 					}
 				}

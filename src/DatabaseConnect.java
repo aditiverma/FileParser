@@ -191,4 +191,22 @@ class DatabaseConnect {
 		}
 		return false;
 	}
+	
+	public boolean doesSchemaExistForDataFile(File file){
+	  String specName = file.toString().split("_")[0];
+	  Statement stmt = null;
+    try {
+      stmt = conn.createStatement();
+      String sql = "select file_name from "+DATABASE_NAME+"."+METADATA_TABLE_NAME+" where file_name=\'"+ specName + "\'";
+      ResultSet rs = stmt.executeQuery(sql);
+      if (rs.next()) {
+        return true;
+      }
+      stmt.close();
+    } catch (SQLException e) {
+      e.printStackTrace();
+    }
+    return false;
+	  
+	}
 }
